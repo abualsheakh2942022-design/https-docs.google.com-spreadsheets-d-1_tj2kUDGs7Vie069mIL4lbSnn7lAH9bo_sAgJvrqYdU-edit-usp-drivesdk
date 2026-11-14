@@ -1,0 +1,6 @@
+{
+  "name": "حاسب الكميات الإنشائية",
+  "description": "حساب كميات مواد البناء والخرسانات والتسليح والمباني والتشطيبات وفق الكود البريطاني والمواصفات السودانية",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

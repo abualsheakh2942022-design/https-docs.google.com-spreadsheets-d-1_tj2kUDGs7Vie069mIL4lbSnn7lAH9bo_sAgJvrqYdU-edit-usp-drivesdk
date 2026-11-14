@@ -1,0 +1,240 @@
+{
+  "entities": {
+    "CommunityPost": {
+      "title": "CommunityPost",
+      "description": "Engineering community post for sharing site photos, engineering ideas, field solutions, consultations, and blueprint discussions.",
+      "type": "object",
+      "properties": {
+        "authorId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the post author."
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the post author."
+        },
+        "title": {
+          "type": "string",
+          "description": "Concise title of the engineering post or question."
+        },
+        "body": {
+          "type": "string",
+          "description": "Detailed engineering description, dimensions, or site situation."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "SITE_PHOTO",
+            "ENGINEERING_IDEA",
+            "FIELD_SOLUTION",
+            "CONSULTATION",
+            "BLUEPRINT_DISCUSSION"
+          ],
+          "description": "Category of the engineering community post."
+        },
+        "location": {
+          "type": "string",
+          "description": "Optional city or site location (e.g. Khartoum, Bahri, Omdurman)."
+        },
+        "photoBase64": {
+          "type": "string",
+          "description": "Optional compressed JPEG image encoded as Base64."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["PUBLIC"],
+          "description": "Visibility scope of the post; must be PUBLIC for community listing."
+        },
+        "likesCount": {
+          "type": "integer",
+          "description": "Atomic count of likes on the post."
+        },
+        "commentsCount": {
+          "type": "integer",
+          "description": "Atomic count of comments/solutions on the post."
+        },
+        "solved": {
+          "type": "boolean",
+          "description": "Whether the consultation or issue has been marked solved by the author."
+        },
+        "acceptedCommentId": {
+          "type": "string",
+          "description": "Optional ID of the comment accepted as the best solution."
+        },
+        "lastCommentId": {
+          "type": "string",
+          "description": "Optional ID of the last added or removed comment used for atomic batch verification."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the post was created (clients must write FieldValue.serverTimestamp())."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the post was last updated (clients must write FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "authorId",
+        "authorName",
+        "title",
+        "body",
+        "category",
+        "visibility",
+        "likesCount",
+        "commentsCount",
+        "solved",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CommunityComment": {
+      "title": "CommunityComment",
+      "description": "A reply, field solution, or engineering review comment attached to a CommunityPost.",
+      "type": "object",
+      "properties": {
+        "postId": {
+          "type": "string",
+          "description": "Parent post document ID."
+        },
+        "authorId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the comment author."
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the comment author."
+        },
+        "text": {
+          "type": "string",
+          "description": "Engineering reply or proposed solution text."
+        },
+        "photoBase64": {
+          "type": "string",
+          "description": "Optional compressed JPEG attachment encoded as Base64."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["PUBLIC"],
+          "description": "Visibility scope matching the parent post."
+        },
+        "acceptedSolution": {
+          "type": "boolean",
+          "description": "True if the parent post author accepted this comment as the verified solution."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the comment was created (clients must write FieldValue.serverTimestamp())."
+        }
+      },
+      "required": [
+        "postId",
+        "authorId",
+        "authorName",
+        "text",
+        "visibility",
+        "acceptedSolution",
+        "createdAt"
+      ]
+    },
+    "LikedPost": {
+      "title": "LikedPost",
+      "description": "Per-user marker document tracking whether a user liked a specific community post.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who liked the post."
+        },
+        "postId": {
+          "type": "string",
+          "description": "Document ID of the liked community post."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the like was recorded (clients must write FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["userId", "postId", "createdAt"]
+    },
+    "CommunityReport": {
+      "title": "CommunityReport",
+      "description": "User moderation report submitted against a community post or comment for Google Play UGC safety compliance.",
+      "type": "object",
+      "properties": {
+        "reporterId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the reporting user."
+        },
+        "targetType": {
+          "type": "string",
+          "enum": ["POST", "COMMENT"],
+          "description": "Type of content being reported."
+        },
+        "targetId": {
+          "type": "string",
+          "description": "Document ID of the reported post or comment."
+        },
+        "postId": {
+          "type": "string",
+          "description": "Parent post document ID."
+        },
+        "reportedAuthorId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the reported content author."
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["INAPPROPRIATE", "MISLEADING_ENGINEERING", "SPAM", "PRIVACY_VIOLATION"],
+          "description": "Structured moderation reason."
+        },
+        "details": {
+          "type": "string",
+          "description": "Optional extra details from the reporter."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["OPEN"],
+          "description": "Initial report status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the report was submitted."
+        }
+      },
+      "required": [
+        "reporterId",
+        "targetType",
+        "targetId",
+        "postId",
+        "reportedAuthorId",
+        "reason",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/community_posts/{postId}": {
+      "schema": { "$ref": "#/entities/CommunityPost" },
+      "description": "Top-level collection of engineering community posts shared by authenticated users."
+    },
+    "/community_posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/CommunityComment" },
+      "description": "Subcollection of comments and engineering solutions on a community post."
+    },
+    "/community_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/CommunityReport" },
+      "description": "User-submitted moderation reports for community posts and comments."
+    },
+    "/users/{userId}/liked_posts/{postId}": {
+      "schema": { "$ref": "#/entities/LikedPost" },
+      "description": "User-scoped subcollection tracking liked community posts for atomic like/unlike enforcement."
+    }
+  }
+}

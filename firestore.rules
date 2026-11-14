@@ -1,0 +1,270 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidPostCategory(category) {
+      return category in [
+        'SITE_PHOTO',
+        'ENGINEERING_IDEA',
+        'FIELD_SOLUTION',
+        'CONSULTATION',
+        'BLUEPRINT_DISCUSSION'
+      ];
+    }
+
+    function isValidCommunityPost(data) {
+      return data.authorId is string && isValidId(data.authorId) &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 140 &&
+             data.body is string && data.body.size() >= 3 && data.body.size() <= 4000 &&
+             data.category is string && isValidPostCategory(data.category) &&
+             data.visibility == 'PUBLIC' &&
+             data.likesCount is int && data.likesCount >= 0 &&
+             data.commentsCount is int && data.commentsCount >= 0 &&
+             data.solved is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time &&
+             (!('location' in data) || data.location == null || (data.location is string && data.location.size() <= 120)) &&
+             (!('photoBase64' in data) || data.photoBase64 == null || (data.photoBase64 is string && data.photoBase64.size() <= 450000)) &&
+             (!('acceptedCommentId' in data) || data.acceptedCommentId == null || isValidId(data.acceptedCommentId)) &&
+             (!('lastCommentId' in data) || data.lastCommentId == null || isValidId(data.lastCommentId));
+    }
+
+    function isValidCommunityComment(data) {
+      return data.postId is string && isValidId(data.postId) &&
+             data.authorId is string && isValidId(data.authorId) &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             data.visibility == 'PUBLIC' &&
+             data.acceptedSolution is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('photoBase64' in data) || data.photoBase64 == null || (data.photoBase64 is string && data.photoBase64.size() <= 450000));
+    }
+
+    function isValidLikedPost(data) {
+      return data.userId is string && isValidId(data.userId) &&
+             data.postId is string && isValidId(data.postId) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /community_posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId) && existing().visibility == 'PUBLIC';
+      allow list: if isSignedIn() && existing().visibility == 'PUBLIC';
+
+      allow create: if isSignedIn() &&
+                       isValidId(postId) &&
+                       isValidCommunityPost(incoming()) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().likesCount == 0 &&
+                       incoming().commentsCount == 0 &&
+                       incoming().solved == false &&
+                       incoming().keys().hasAll([
+                         'authorId', 'authorName', 'title', 'body', 'category',
+                         'visibility', 'likesCount', 'commentsCount', 'solved',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'authorId', 'authorName', 'title', 'body', 'category',
+                         'location', 'photoBase64', 'visibility', 'likesCount',
+                         'commentsCount', 'solved', 'acceptedCommentId',
+                         'lastCommentId', 'createdAt', 'updatedAt'
+                       ]);
+
+      allow update: if isSignedIn() &&
+                       isValidId(postId) &&
+                       isValidCommunityPost(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().visibility == existing().visibility && (
+                         // Action 1: Author edits post details or marks solved / accepted solution
+                         (
+                           request.auth.uid == existing().authorId &&
+                           incoming().likesCount == existing().likesCount &&
+                           incoming().commentsCount == existing().commentsCount &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'title', 'body', 'category', 'location', 'photoBase64',
+                             'solved', 'acceptedCommentId', 'updatedAt'
+                           ])
+                         ) ||
+                         // Action 2: Atomic like increment paired with user's liked_posts/{postId} creation
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['likesCount']) &&
+                           incoming().likesCount == existing().likesCount + 1 &&
+                           !exists(/databases/$(database)/documents/users/$(request.auth.uid)/liked_posts/$(postId)) &&
+                           existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/liked_posts/$(postId))
+                         ) ||
+                         // Action 3: Atomic unlike decrement paired with user's liked_posts/{postId} deletion
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['likesCount']) &&
+                           existing().likesCount > 0 &&
+                           incoming().likesCount == existing().likesCount - 1 &&
+                           exists(/databases/$(database)/documents/users/$(request.auth.uid)/liked_posts/$(postId)) &&
+                           !existsAfter(/databases/$(database)/documents/users/$(request.auth.uid)/liked_posts/$(postId))
+                         ) ||
+                         // Action 4: Atomic comment count increment paired with new comment creation
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'lastCommentId', 'updatedAt']) &&
+                           incoming().commentsCount == existing().commentsCount + 1 &&
+                           incoming().lastCommentId is string &&
+                           isValidId(incoming().lastCommentId) &&
+                           !exists(/databases/$(database)/documents/community_posts/$(postId)/comments/$(incoming().lastCommentId)) &&
+                           existsAfter(/databases/$(database)/documents/community_posts/$(postId)/comments/$(incoming().lastCommentId))
+                         ) ||
+                         // Action 5: Atomic comment count decrement paired with comment author deleting their comment
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'lastCommentId']) &&
+                           existing().commentsCount > 0 &&
+                           incoming().commentsCount == existing().commentsCount - 1 &&
+                           incoming().lastCommentId is string &&
+                           isValidId(incoming().lastCommentId) &&
+                           exists(/databases/$(database)/documents/community_posts/$(postId)/comments/$(incoming().lastCommentId)) &&
+                           get(/databases/$(database)/documents/community_posts/$(postId)/comments/$(incoming().lastCommentId)).data.authorId == request.auth.uid &&
+                           !existsAfter(/databases/$(database)/documents/community_posts/$(postId)/comments/$(incoming().lastCommentId))
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(postId) && existing().authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow get: if isSignedIn() && isValidId(postId) && isValidId(commentId) && existing().visibility == 'PUBLIC';
+        allow list: if isSignedIn() && isValidId(postId) && existing().visibility == 'PUBLIC';
+
+        allow create: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         isValidCommunityComment(incoming()) &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().postId == postId &&
+                         incoming().acceptedSolution == false &&
+                         incoming().keys().hasAll([
+                           'postId', 'authorId', 'authorName', 'text',
+                           'visibility', 'acceptedSolution', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'postId', 'authorId', 'authorName', 'text',
+                           'photoBase64', 'visibility', 'acceptedSolution', 'createdAt'
+                         ]) &&
+                         exists(/databases/$(database)/documents/community_posts/$(postId)) &&
+                         getAfter(/databases/$(database)/documents/community_posts/$(postId)).data.commentsCount ==
+                           get(/databases/$(database)/documents/community_posts/$(postId)).data.commentsCount + 1 &&
+                         getAfter(/databases/$(database)/documents/community_posts/$(postId)).data.lastCommentId == commentId;
+
+        allow update: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         isValidCommunityComment(incoming()) &&
+                         incoming().authorId == existing().authorId &&
+                         incoming().postId == existing().postId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().visibility == existing().visibility && (
+                           // Comment author edits text or photo
+                           (
+                             request.auth.uid == existing().authorId &&
+                             incoming().acceptedSolution == existing().acceptedSolution &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['text', 'photoBase64'])
+                           ) ||
+                           // Parent post author marks comment as accepted solution
+                           (
+                             get(/databases/$(database)/documents/community_posts/$(postId)).data.authorId == request.auth.uid &&
+                             incoming().diff(existing()).affectedKeys().hasOnly(['acceptedSolution'])
+                           )
+                         );
+
+        allow delete: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         existing().authorId == request.auth.uid &&
+                         exists(/databases/$(database)/documents/community_posts/$(postId)) &&
+                         getAfter(/databases/$(database)/documents/community_posts/$(postId)).data.commentsCount ==
+                           get(/databases/$(database)/documents/community_posts/$(postId)).data.commentsCount - 1;
+      }
+    }
+
+    function isValidReportReason(reason) {
+      return reason in [
+        'INAPPROPRIATE',
+        'MISLEADING_ENGINEERING',
+        'SPAM',
+        'PRIVACY_VIOLATION'
+      ];
+    }
+
+    function isValidCommunityReport(data) {
+      return data.reporterId is string && isValidId(data.reporterId) &&
+             data.targetType in ['POST', 'COMMENT'] &&
+             data.targetId is string && isValidId(data.targetId) &&
+             data.postId is string && isValidId(data.postId) &&
+             data.reportedAuthorId is string && isValidId(data.reportedAuthorId) &&
+             data.reason is string && isValidReportReason(data.reason) &&
+             data.status == 'OPEN' &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 500));
+    }
+
+    match /community_reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && existing().reporterId == request.auth.uid;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(reportId) &&
+                       isValidCommunityReport(incoming()) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().keys().hasAll([
+                         'reporterId', 'targetType', 'targetId', 'postId',
+                         'reportedAuthorId', 'reason', 'status', 'createdAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'reporterId', 'targetType', 'targetId', 'postId',
+                         'reportedAuthorId', 'reason', 'details', 'status', 'createdAt'
+                       ]);
+
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/liked_posts/{postId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(postId) &&
+                       isValidLikedPost(incoming()) &&
+                       incoming().userId == userId &&
+                       incoming().postId == postId &&
+                       incoming().keys().hasAll(['userId', 'postId', 'createdAt']) &&
+                       incoming().keys().hasOnly(['userId', 'postId', 'createdAt']) &&
+                       exists(/databases/$(database)/documents/community_posts/$(postId)) &&
+                       getAfter(/databases/$(database)/documents/community_posts/$(postId)).data.likesCount ==
+                         get(/databases/$(database)/documents/community_posts/$(postId)).data.likesCount + 1;
+
+      allow update: if false;
+
+      allow delete: if isSignedIn() &&
+                       request.auth.uid == userId &&
+                       isValidId(postId) &&
+                       exists(/databases/$(database)/documents/community_posts/$(postId)) &&
+                       getAfter(/databases/$(database)/documents/community_posts/$(postId)).data.likesCount ==
+                         get(/databases/$(database)/documents/community_posts/$(postId)).data.likesCount - 1;
+    }
+  }
+}
